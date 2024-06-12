@@ -208,7 +208,7 @@ class InferYoloV9SegFactory(dataprocess.CTaskFactory):
         self.info.name = "infer_yolo_v9_seg"
         self.info.short_description = "Instance segmentation with YOLOv9 models"
         # relative path -> as displayed in Ikomia Studio algorithm tree
-        self.info.path = "Plugins/Python/Detection"
+        self.info.path = "Plugins/Python/Instance Segmentation"
         self.info.version = "1.0.0"
         self.info.icon_path = "images/icon.png"
         self.info.authors = "Wang, Chien-Yao  and Liao, Hong-Yuan Mark"
