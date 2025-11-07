@@ -1,11 +1,13 @@
 import copy
-from ikomia import core, dataprocess, utils
-from ultralytics import YOLO
-import torch
-import cv2
 import os
-from ultralytics import download
 
+import torch
+
+from ikomia import core, dataprocess, utils
+import cv2
+
+from ultralytics import YOLO
+from ultralytics import download
 
 
 # --------------------
@@ -37,13 +39,14 @@ class InferYoloV9SegParam(core.CWorkflowTaskParam):
     def get_values(self):
         # Send parameters values to Ikomia application
         # Create the specific dict structure (string container)
-        param_map = {}
-        param_map["model_name"] = str(self.model_name)
-        param_map["cuda"] = str(self.cuda)
-        param_map["input_size"] = str(self.input_size)
-        param_map["conf_thres"] = str(self.conf_thres)
-        param_map["iou_thres"] = str(self.iou_thres)
-        param_map["model_weight_file"] = str(self.model_weight_file)
+        param_map = {
+            "model_name": str(self.model_name),
+            "cuda": str(self.cuda),
+            "input_size": str(self.input_size),
+            "conf_thres": str(self.conf_thres),
+            "iou_thres": str(self.iou_thres),
+            "model_weight_file": str(self.model_weight_file)
+        }
         return param_map
 
 
@@ -55,10 +58,6 @@ class InferYoloV9Seg(dataprocess.CInstanceSegmentationTask):
 
     def __init__(self, name, param):
         dataprocess.CInstanceSegmentationTask.__init__(self, name)
-        # Add input/output of the algorithm here
-        # Example :  self.add_input(dataprocess.CImageIO())
-        #           self.add_output(dataprocess.CImageIO())
-
         # Create parameters object
         if param is None:
             self.set_param_object(InferYoloV9SegParam())
@@ -72,8 +71,6 @@ class InferYoloV9Seg(dataprocess.CInstanceSegmentationTask):
         self.model = None
         self.half = False
         self.model_name = None
-
-
 
     def get_progress_steps(self):
         # Function returning the number of progress steps for this algorithm
@@ -101,6 +98,31 @@ class InferYoloV9Seg(dataprocess.CInstanceSegmentationTask):
 
         return resized_image, dw, dh
 
+    def _load_model(self):
+        param = self.get_param_object()
+        self.device = torch.device("cuda") if param.cuda and torch.cuda.is_available() else torch.device("cpu")
+        self.half = True if param.cuda and torch.cuda.is_available() else False
+
+        if param.model_weight_file:
+            self.model = YOLO(param.model_weight_file)
+        else:
+            # Set path
+            model_folder = os.path.join(os.path.dirname(os.path.realpath(__file__)), "weights")
+            model_weights = os.path.join(str(model_folder), f'{param.model_name}.pt')
+
+            # Download model if not exist
+            if not os.path.isfile(model_weights):
+                url = f'https://github.com/{self.repo}/releases/download/{self.version}/{param.model_name}.pt'
+                download(url=url, dir=model_folder, unzip=True)
+
+            self.model = YOLO(model_weights)
+
+        param.update = False
+
+    def init_long_process(self):
+        self._load_model()
+        super().init_long_process()
+
     def run(self):
         # Call begin_task_run() for initialization
         self.begin_task_run()
@@ -112,10 +134,10 @@ class InferYoloV9Seg(dataprocess.CInstanceSegmentationTask):
         param = self.get_param_object()
 
         # Get input :
-        input = self.get_input(0)
+        img_input = self.get_input(0)
 
         # Get image from input/output (numpy array):
-        ini_src_image = input.get_image()
+        ini_src_image = img_input.get_image()
 
         # Resize image to input size and stride
         src_image, dw, dh = self.resize_to_stride(
@@ -124,25 +146,8 @@ class InferYoloV9Seg(dataprocess.CInstanceSegmentationTask):
                                     )
 
        # Load model
-        if param.update or self.model is None:
-            self.device = torch.device(
-                "cuda") if param.cuda and torch.cuda.is_available() else torch.device("cpu")
-            self.half = True if param.cuda and torch.cuda.is_available() else False
-
-            if param.model_weight_file:
-                self.model = YOLO(param.model_weight_file)
-            else:
-                # Set path
-                model_folder = os.path.join(os.path.dirname(
-                    os.path.realpath(__file__)), "weights")
-                model_weights = os.path.join(
-                    str(model_folder), f'{param.model_name}.pt')
-                # Download model if not exist
-                if not os.path.isfile(model_weights):
-                    url = f'https://github.com/{self.repo}/releases/download/{self.version}/{param.model_name}.pt'
-                    download(url=url, dir=model_folder, unzip=True)
-                self.model = YOLO(model_weights)
-            param.update = False
+        if param.update:
+            self._load_model()
 
         # Run detection
         results = self.model.predict(
@@ -166,7 +171,6 @@ class InferYoloV9Seg(dataprocess.CInstanceSegmentationTask):
             class_idx = results[0].boxes.cls
             masks = results[0].masks.data
             masks = masks.detach().cpu().numpy()
-
 
             for i, (box, conf, cls, mask) in enumerate(zip(boxes, confidences, class_idx, masks)):
                 box = box.detach().cpu().numpy()
@@ -209,7 +213,8 @@ class InferYoloV9SegFactory(dataprocess.CTaskFactory):
         self.info.short_description = "Instance segmentation with YOLOv9 models"
         # relative path -> as displayed in Ikomia Studio algorithm tree
         self.info.path = "Plugins/Python/Instance Segmentation"
-        self.info.version = "1.0.1"
+        self.info.version = "1.1.0"
+        self.info_min_ikomia_version = "0.15.0"
         self.info.icon_path = "images/icon.png"
         self.info.authors = "Wang, Chien-Yao  and Liao, Hong-Yuan Mark"
         self.info.article = "YOLOv9: Learning What You Want to Learn Using Programmable Gradient Information"
@@ -225,6 +230,11 @@ class InferYoloV9SegFactory(dataprocess.CTaskFactory):
         self.info.keywords = "YOLO, instance, segmentation, real-time, Pytorch"
         self.info.algo_type = core.AlgoType.INFER
         self.info.algo_tasks = "INSTANCE_SEGMENTATION"
+        # Min hardware config
+        self.info.hardware_config.min_cpu = 4
+        self.info.hardware_config.min_ram = 16
+        self.info.hardware_config.gpu_required = False
+        self.info.hardware_config.min_vram = 6
 
     def create(self, param=None):
         # Create algorithm object
